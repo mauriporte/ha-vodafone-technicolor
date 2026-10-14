@@ -9,6 +9,13 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Router login refused",
+        "description": "The router refused the login, so updates have stopped to avoid locking its web interface. Enter the web interface password again (wait a few minutes first if the router has locked logins).",
+        "data": {
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -17,7 +24,8 @@
       "router_busy": "Someone is logged in to the router's web interface. Log out there and try again."
     },
     "abort": {
-      "already_configured": "This router is already configured."
+      "already_configured": "This router is already configured.",
+      "reauth_successful": "The password was updated and updates have resumed."
     }
   },
   "services": {

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import time
 from dataclasses import dataclass, field
 
 import aiohttp
@@ -20,7 +21,10 @@ HEADERS = {
 }
 # The web UI's own rule for device names.
 HOSTNAME_RE = re.compile(r"^([a-z0-9](-*[a-z0-9])*)(([a-z0-9](-*[a-z0-9])*))*$", re.I)
-NETWORK_BY_INTERFACE ={"Device.WiFi.SSID.1": "wifi_24", "Device.WiFi.SSID.2": "wifi_5", "Device.WiFi.SSID.3": "guest"}
+# Minimum gap between logins. The router locks the web interface after bursts of logins,
+# so even back-to-back actions (several renames) are spaced out.
+MIN_LOGIN_INTERVAL = 10.0
+NETWORK_BY_INTERFACE = {"Device.WiFi.SSID.1": "wifi_24", "Device.WiFi.SSID.2": "wifi_5", "Device.WiFi.SSID.3": "guest"}
 
 
 class AuthError(Exception):
@@ -156,6 +160,7 @@ class VodafoneTechnicolorClient:
         self._polls = 0
         # One router session at a time: a poll and a rename share the cookie jar, and the router allows a single login.
         self._lock = asyncio.Lock()
+        self._last_login = float("-inf")
 
     async def _request(self, method: str, path: str, data: dict | None = None) -> dict:
         try:
@@ -170,12 +175,19 @@ class VodafoneTechnicolorClient:
             raise ConnectError(str(err)) from err
 
     async def _login(self) -> None:
+        wait = self._last_login + MIN_LOGIN_INTERVAL - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        self._last_login = time.monotonic()
         # No "logout" flag: if someone is using the web interface, back off instead of kicking them out.
         salts = await self._request("POST", "api/v1/session/login", {"username": self._username, "password": "seeksalthash"})
         if salts.get("message") == "MSG_LOGIN_150":
             raise RouterBusy
         if "salt" not in salts:
-            raise ConnectError(f"login: unexpected answer {salts.get('message')}")
+            # e.g. MSG_LOGIN_1: the router refuses logins (wrong credentials or a lockout, with a wait time in
+            # data.failedAttempts). Treat it as an auth failure so Home Assistant stops polling and asks for the
+            # password again, instead of retrying and extending the lockout.
+            raise AuthError(f"login refused by the router: {salts.get('message')}")
         res = await self._request("POST", "api/v1/session/login", {
             "username": self._username,
             "password": login_hash(self._password, salts["salt"], salts["saltwebui"]),
