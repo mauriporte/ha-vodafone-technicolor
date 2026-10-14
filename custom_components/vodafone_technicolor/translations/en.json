@@ -27,21 +27,5 @@
       "already_configured": "This router is already configured.",
       "reauth_successful": "The password was updated and updates have resumed."
     }
-  },
-  "services": {
-    "rename_device": {
-      "name": "Rename device",
-      "description": "Changes the name the router shows for a connected device.",
-      "fields": {
-        "mac": {
-          "name": "MAC address",
-          "description": "MAC address of the device, as listed in the device sensors."
-        },
-        "name": {
-          "name": "New name",
-          "description": "Letters, digits and hyphens only (the router's own rule)."
-        }
-      }
-    }
   }
 }

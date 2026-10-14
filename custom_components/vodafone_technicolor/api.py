@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import time
 from dataclasses import dataclass, field
 
@@ -19,10 +18,8 @@ HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "application/json, text/javascript, */*; q=0.01",
 }
-# The web UI's own rule for device names.
-HOSTNAME_RE = re.compile(r"^([a-z0-9](-*[a-z0-9])*)(([a-z0-9](-*[a-z0-9])*))*$", re.I)
 # Minimum gap between logins. The router locks the web interface after bursts of logins,
-# so even back-to-back actions (several renames) are spaced out.
+# so even back-to-back polls (e.g. a manual refresh) are spaced out.
 MIN_LOGIN_INTERVAL = 10.0
 NETWORK_BY_INTERFACE = {"Device.WiFi.SSID.1": "wifi_24", "Device.WiFi.SSID.2": "wifi_5", "Device.WiFi.SSID.3": "guest"}
 
@@ -158,7 +155,7 @@ class VodafoneTechnicolorClient:
         self._username, self._password = username, password
         self._docsis: dict = {}
         self._polls = 0
-        # One router session at a time: a poll and a rename share the cookie jar, and the router allows a single login.
+        # One router session at a time: the router allows a single login, so overlapping polls must not interleave.
         self._lock = asyncio.Lock()
         self._last_login = float("-inf")
 
@@ -201,36 +198,6 @@ class VodafoneTechnicolorClient:
             await self._request("POST", "api/v1/session/logout", {})
         except ConnectError:
             pass  # the session expires on its own
-
-    async def rename_device(self, mac: str, name: str) -> None:
-        """Set the name the router shows for a device (same call as the web UI's edit dialog)."""
-        if not HOSTNAME_RE.match(name):
-            raise ValueError("Names may only contain letters, digits and hyphens")
-        async with self._lock:
-            await self._rename_device(mac, name)
-
-    async def _rename_device(self, mac: str, name: str) -> None:
-        self._session.cookie_jar.clear()
-        await self._login()
-        try:
-            host = await self._request("GET", "api/v1/host")
-            device = next((h for h in host["data"]["hostTbl"] if h.get("physaddress", "").upper() == mac.upper()), None)
-            if device is None:
-                raise ValueError(f"No device with MAC {mac}")
-            data = {"HostName": name}
-            if device.get("addresssource") == "Static" and device.get("staticId"):
-                # Devices with a reserved IP also carry their name in the router's static DHCP table.
-                data |= {"staticId": device["staticId"], "StaticHostName": name}
-            async with self._session.post(self._base + f"api/v1/devices/{device['__id']}", data=data,
-                                          headers={**HEADERS, "Referer": self._base, "X-CSRF-TOKEN": host.get("token", "")},
-                                          timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                res = await resp.json(content_type=None)
-            if res.get("error") != "ok":
-                raise ConnectError(f"rename failed: {res.get('message')}")
-        except (KeyError, TypeError) as err:
-            raise ConnectError(f"unexpected data: {err}") from err
-        finally:
-            await self._logout()
 
     async def fetch(self) -> RouterData:
         async with self._lock:
