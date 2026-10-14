@@ -4,7 +4,11 @@
       "user": {
         "title": "Vodafone Station (Technicolor)",
         "description": "Login of the router's web interface. Log out of the web interface in your browser first: the router allows only one session at a time.",
-        "data": {"host": "Host", "username": "Username", "password": "Password"}
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -12,6 +16,24 @@
       "cannot_connect": "Cannot reach the router's web interface.",
       "router_busy": "Someone is logged in to the router's web interface. Log out there and try again."
     },
-    "abort": {"already_configured": "This router is already configured."}
+    "abort": {
+      "already_configured": "This router is already configured."
+    }
+  },
+  "services": {
+    "rename_device": {
+      "name": "Rename device",
+      "description": "Changes the name the router shows for a connected device.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device, as listed in the device sensors."
+        },
+        "name": {
+          "name": "New name",
+          "description": "Letters, digits and hyphens only (the router's own rule)."
+        }
+      }
+    }
   }
 }

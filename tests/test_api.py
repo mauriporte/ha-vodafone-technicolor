@@ -75,6 +75,35 @@ def test_docsis():
                  "downstream_snr_min": 40.1, "upstream_channels": 2, "upstream_power_avg": 35.2}
 
 
+def test_hostname_rule():
+    for ok in ("LivingRoomLamp", "tv-1", "a"):
+        assert api.HOSTNAME_RE.match(ok), ok
+    for bad in ("Living room", "lámpara", "-tv", "tv-", "a_b", ""):
+        assert not api.HOSTNAME_RE.match(bad), bad
+
+
+def test_poll_and_rename_never_overlap():
+    import asyncio
+
+    async def run():
+        client = api.VodafoneTechnicolorClient(None, "192.0.2.1", "u", "p")
+        active, overlaps = 0, []
+
+        async def busy(*_):
+            nonlocal active
+            active += 1
+            overlaps.append(active)
+            await asyncio.sleep(0.01)
+            active -= 1
+
+        client._fetch = busy
+        client._rename_device = busy
+        await asyncio.gather(client.fetch(), client.rename_device("02:00:00:00:00:0A", "lamp"), client.fetch())
+        return overlaps
+
+    assert max(asyncio.run(run())) == 1  # the router allows a single session, so never two at once
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
