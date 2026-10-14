@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Vodafone Station (Technicolor)",
+        "description": "Login of the router's web interface. Log out of the web interface in your browser first: the router allows only one session at a time.",
+        "data": {"host": "Host", "username": "Username", "password": "Password"}
+      }
+    },
+    "error": {
+      "invalid_auth": "Wrong username or password.",
+      "cannot_connect": "Cannot reach the router's web interface.",
+      "router_busy": "Someone is logged in to the router's web interface. Log out there and try again."
+    },
+    "abort": {"already_configured": "This router is already configured."}
+  }
+}
