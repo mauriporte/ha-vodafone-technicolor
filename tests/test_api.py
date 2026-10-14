@@ -75,14 +75,7 @@ def test_docsis():
                  "downstream_snr_min": 40.1, "upstream_channels": 2, "upstream_power_avg": 35.2}
 
 
-def test_hostname_rule():
-    for ok in ("LivingRoomLamp", "tv-1", "a"):
-        assert api.HOSTNAME_RE.match(ok), ok
-    for bad in ("Living room", "lámpara", "-tv", "tv-", "a_b", ""):
-        assert not api.HOSTNAME_RE.match(bad), bad
-
-
-def test_poll_and_rename_never_overlap():
+def test_polls_never_overlap():
     import asyncio
 
     async def run():
@@ -97,8 +90,7 @@ def test_poll_and_rename_never_overlap():
             active -= 1
 
         client._fetch = busy
-        client._rename_device = busy
-        await asyncio.gather(client.fetch(), client.rename_device("02:00:00:00:00:0A", "lamp"), client.fetch())
+        await asyncio.gather(client.fetch(), client.fetch(), client.fetch())
         return overlaps
 
     assert max(asyncio.run(run())) == 1  # the router allows a single session, so never two at once

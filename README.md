@@ -15,7 +15,6 @@ Home Assistant's built-in *Vodafone Station* integration does not work with the 
 | Devices per network | One sensor each for 2.4 GHz, 5 GHz, guest and wired: the number of active devices, with the list (name, IP, MAC, signal, link speed, Ethernet port, connected time, type) as attributes |
 | Phone | Status of each enabled VoIP line |
 | Session | A diagnostic binary sensor that turns on while someone is using the router's web interface |
-| Action | `vodafone_technicolor.rename_device`: rename a device on the router |
 
 The router's API has no per-device traffic counters. For overall internet traffic, use Home Assistant's built-in **UPnP/IGD** integration on the same router.
 
@@ -33,6 +32,13 @@ Once a minute the integration does what the router's web interface does:
 The router allows **only one logged-in admin**. The integration never forces another session out. If you're logged in to the web interface in a browser, the integration skips its update, keeps the last values, and turns on **Web interface in use**. It picks up again once you log out, or your browser session times out.
 
 The reverse also applies: if you open the web interface during the few seconds the integration is logged in, the router asks whether to log out the other user. Answering yes is harmless.
+
+### If the router refuses the login
+
+The router locks its web interface for a while after repeated logins it doesn't like. To avoid making that worse, the integration:
+
+- Never retries a refused login. It stops updating, and Home Assistant shows a **Reconfigure / re-authenticate** prompt where you confirm the password.
+- Keeps at least 10 seconds between logins.
 
 ## Installation
 
@@ -107,21 +113,6 @@ With the default device name **Vodafone Station**:
 | `sensor.vodafone_station_lan_ip` | Attribute `ports` (Ethernet port status and speed) |
 | `sensor.vodafone_station_mac`, `…_firmware`, `…_last_boot`, `…_cpu_usage`, `…_memory_used`, `…_internet_status` | Diagnostic |
 | `binary_sensor.vodafone_station_web_interface_in_use` | Diagnostic; on while updates are paused because someone else is logged in |
-
-## Actions
-
-### `vodafone_technicolor.rename_device`
-
-Changes the name the router shows for a device, the same way as the edit dialog in the router's web interface. Names may only contain letters, digits and hyphens (the router's own rule).
-
-```yaml
-action: vodafone_technicolor.rename_device
-data:
-  mac: "02:00:00:00:00:0A"
-  name: LivingRoomLamp
-```
-
-The MAC addresses are listed in the `devices` attribute of the device sensors. For a device with a reserved IP, the name in the router's static DHCP table is updated too. If someone is logged in to the router's web interface, the action fails with a message instead of logging them out; try again later.
 
 ## Dashboard example
 
