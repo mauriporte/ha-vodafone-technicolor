@@ -15,6 +15,7 @@ Home Assistant's built-in *Vodafone Station* integration does not work with the 
 | Devices per network | One sensor each for 2.4 GHz, 5 GHz, guest and wired: the number of active devices, with the list (name, IP, MAC, signal, link speed, Ethernet port, connected time, type) as attributes |
 | Phone | Status of each enabled VoIP line |
 | Session | A diagnostic binary sensor that turns on while someone is using the router's web interface |
+| Action | `vodafone_technicolor.rename_device`: rename a device on the router |
 
 The router's API has no per-device traffic counters. For overall internet traffic, use Home Assistant's built-in **UPnP/IGD** integration on the same router.
 
@@ -106,6 +107,21 @@ With the default device name **Vodafone Station**:
 | `sensor.vodafone_station_lan_ip` | Attribute `ports` (Ethernet port status and speed) |
 | `sensor.vodafone_station_mac`, `…_firmware`, `…_last_boot`, `…_cpu_usage`, `…_memory_used`, `…_internet_status` | Diagnostic |
 | `binary_sensor.vodafone_station_web_interface_in_use` | Diagnostic; on while updates are paused because someone else is logged in |
+
+## Actions
+
+### `vodafone_technicolor.rename_device`
+
+Changes the name the router shows for a device, the same way as the edit dialog in the router's web interface. Names may only contain letters, digits and hyphens (the router's own rule).
+
+```yaml
+action: vodafone_technicolor.rename_device
+data:
+  mac: "02:00:00:00:00:0A"
+  name: LivingRoomLamp
+```
+
+The MAC addresses are listed in the `devices` attribute of the device sensors. For a device with a reserved IP, the name in the router's static DHCP table is updated too. If someone is logged in to the router's web interface, the action fails with a message instead of logging them out; try again later.
 
 ## Dashboard example
 
