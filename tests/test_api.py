@@ -104,6 +104,53 @@ def test_poll_and_rename_never_overlap():
     assert max(asyncio.run(run())) == 1  # the router allows a single session, so never two at once
 
 
+def test_refused_login_stops_instead_of_retrying():
+    import asyncio
+
+    async def run():
+        client = api.VodafoneTechnicolorClient(None, "192.0.2.1", "u", "p")
+        answers = [{"error": "error", "message": "MSG_LOGIN_1", "data": {"failedAttempts": 2}}]
+
+        async def fake_request(*_a, **_k):
+            return answers.pop(0)
+
+        client._request = fake_request
+        try:
+            await client._login()
+        except api.AuthError:
+            return True  # AuthError -> ConfigEntryAuthFailed -> polling stops, user is asked for the password
+        return False
+
+    assert asyncio.run(run())
+
+
+def test_logins_are_spaced_out():
+    import asyncio
+    import time
+
+    async def run():
+        client = api.VodafoneTechnicolorClient(None, "192.0.2.1", "u", "p")
+        api.MIN_LOGIN_INTERVAL, saved = 0.3, api.MIN_LOGIN_INTERVAL
+        stamps = []
+
+        async def fake_request(_m, path, *_a, **_k):
+            if path.endswith("login"):
+                stamps.append(time.monotonic())
+                return {"error": "error", "message": "MSG_LOGIN_150"}
+            return {}
+
+        client._request = fake_request
+        for _ in range(2):
+            try:
+                await client._login()
+            except api.RouterBusy:
+                pass
+        api.MIN_LOGIN_INTERVAL = saved
+        return stamps[1] - stamps[0]
+
+    assert asyncio.run(run()) >= 0.29
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
