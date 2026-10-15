@@ -21,6 +21,10 @@ HEADERS = {
 # Minimum gap between logins. The router locks the web interface after bursts of logins,
 # so even back-to-back polls (e.g. a manual refresh) are spaced out.
 MIN_LOGIN_INTERVAL = 10.0
+# Per router, shared by every client instance: the config flow's credential check and the integration's first
+# poll use separate clients and used to log in back to back, which the router answers with MSG_LOGIN_150.
+_LAST_LOGIN: dict[str, float] = {}
+_LOCKS: dict[str, asyncio.Lock] = {}
 NETWORK_BY_INTERFACE = {"Device.WiFi.SSID.1": "wifi_24", "Device.WiFi.SSID.2": "wifi_5", "Device.WiFi.SSID.3": "guest"}
 
 
@@ -156,8 +160,8 @@ class VodafoneTechnicolorClient:
         self._docsis: dict = {}
         self._polls = 0
         # One router session at a time: the router allows a single login, so overlapping polls must not interleave.
-        self._lock = asyncio.Lock()
-        self._last_login = float("-inf")
+        self._lock = _LOCKS.setdefault(host, asyncio.Lock())
+        self._host = host
 
     async def _request(self, method: str, path: str, data: dict | None = None) -> dict:
         try:
@@ -172,10 +176,10 @@ class VodafoneTechnicolorClient:
             raise ConnectError(str(err)) from err
 
     async def _login(self) -> None:
-        wait = self._last_login + MIN_LOGIN_INTERVAL - time.monotonic()
+        wait = _LAST_LOGIN.get(self._host, float("-inf")) + MIN_LOGIN_INTERVAL - time.monotonic()
         if wait > 0:
             await asyncio.sleep(wait)
-        self._last_login = time.monotonic()
+        _LAST_LOGIN[self._host] = time.monotonic()
         # No "logout" flag: if someone is using the web interface, back off instead of kicking them out.
         salts = await self._request("POST", "api/v1/session/login", {"username": self._username, "password": "seeksalthash"})
         if salts.get("message") == "MSG_LOGIN_150":
