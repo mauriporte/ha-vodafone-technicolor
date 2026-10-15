@@ -148,3 +148,32 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
     print("all tests passed")
+
+
+def test_login_spacing_is_shared_between_clients_of_the_same_router():
+    import asyncio, time
+
+    async def run():
+        a = api.VodafoneTechnicolorClient(None, "10.0.0.1", "u", "p")
+        b = api.VodafoneTechnicolorClient(None, "10.0.0.1", "u", "p")
+        other = api.VodafoneTechnicolorClient(None, "10.0.0.2", "u", "p")
+        assert a._lock is b._lock and a._lock is not other._lock
+        calls = []
+
+        async def fake_request(method, path, data=None):
+            calls.append(time.monotonic())
+            return {"salt": "s", "saltwebui": "w"} if data and data.get("password") == "seeksalthash" else {"error": "ok"}
+
+        for c in (a, b):
+            c._request = fake_request
+        old = api.MIN_LOGIN_INTERVAL
+        api.MIN_LOGIN_INTERVAL = 0.3
+        try:
+            await a._login()
+            t0 = time.monotonic()
+            await b._login()  # a different client, same router: must still wait
+            assert time.monotonic() - t0 >= 0.25
+        finally:
+            api.MIN_LOGIN_INTERVAL = old
+
+    asyncio.run(run())
