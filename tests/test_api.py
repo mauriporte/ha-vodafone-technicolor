@@ -10,6 +10,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "vodafone_technicolor"))
 import api  # noqa: E402
 
+
+async def _web_page_up():
+    pass  # stands in for the reachability probe, which needs a real session
+
 STATUS = {
     "uptime": "190910", "firmwareversion": "19.3B70-1.1.16A", "hardwaretype": "1.0.0", "CPUUsage": "39", "MemoryUsage": "155908",
     "internetipv4": "198.51.100.7", "lanipv4": "192.168.0.1", "lanMAC": "02:00:00:00:00:01", "operational": "OPERATIONAL",
@@ -106,7 +110,7 @@ def test_refused_login_stops_instead_of_retrying():
         async def fake_request(*_a, **_k):
             return answers.pop(0)
 
-        client._request = fake_request
+        client._request, client._probe = fake_request, _web_page_up
         try:
             await client._login()
         except api.AuthError:
@@ -131,7 +135,7 @@ def test_logins_are_spaced_out():
                 return {"error": "error", "message": "MSG_LOGIN_150"}
             return {}
 
-        client._request = fake_request
+        client._request, client._probe = fake_request, _web_page_up
         for _ in range(2):
             try:
                 await client._login()
@@ -165,7 +169,7 @@ def test_login_spacing_is_shared_between_clients_of_the_same_router():
             return {"salt": "s", "saltwebui": "w"} if data and data.get("password") == "seeksalthash" else {"error": "ok"}
 
         for c in (a, b):
-            c._request = fake_request
+            c._request, c._probe = fake_request, _web_page_up
         old = api.MIN_LOGIN_INTERVAL
         api.MIN_LOGIN_INTERVAL = 0.3
         try:
@@ -177,3 +181,58 @@ def test_login_spacing_is_shared_between_clients_of_the_same_router():
             api.MIN_LOGIN_INTERVAL = old
 
     asyncio.run(run())
+
+
+def test_no_login_while_the_web_page_does_not_answer():
+    import asyncio
+
+    class HungSession:
+        def get(self, *_a, **_k):
+            raise TimeoutError
+
+    async def run():
+        client = api.VodafoneTechnicolorClient(HungSession(), "10.0.0.3", "u", "p")
+        sent = []
+
+        async def fake_request(*a, **_k):
+            sent.append(a)
+            return {}
+
+        client._request = fake_request
+        try:
+            await client._login()
+        except api.ConnectError:
+            return sent
+        raise AssertionError("expected ConnectError")
+
+    assert asyncio.run(run()) == []  # no credentials sent to a hung router
+
+
+def test_a_timed_out_login_holds_every_login_to_that_router():
+    import asyncio
+
+    async def run():
+        a = api.VodafoneTechnicolorClient(None, "10.0.0.4", "u", "p")
+        b = api.VodafoneTechnicolorClient(None, "10.0.0.4", "u", "p")  # HA's next setup retry: a new client
+        sent = []
+
+        async def timing_out(_m, path, *_a, **_k):
+            sent.append(path)
+            raise api.ConnectError("timeout") from TimeoutError()
+
+        for c in (a, b):
+            c._request, c._probe = timing_out, _web_page_up
+        try:
+            for c in (a, b):
+                try:
+                    await c._login()
+                except api.ConnectError:
+                    pass
+            hold = api._HOLD_UNTIL["10.0.0.4"] - api.time.monotonic()
+        finally:
+            api._HOLD_UNTIL.pop("10.0.0.4", None)
+        return sent, hold
+
+    sent, hold = asyncio.run(run())
+    assert sent == ["api/v1/session/login"]  # the second client sent nothing
+    assert hold > api.LOGIN_BACKOFF - 5

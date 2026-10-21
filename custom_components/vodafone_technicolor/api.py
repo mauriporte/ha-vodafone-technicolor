@@ -25,6 +25,13 @@ MIN_LOGIN_INTERVAL = 10.0
 # poll use separate clients and used to log in back to back, which the router answers with MSG_LOGIN_150.
 _LAST_LOGIN: dict[str, float] = {}
 _LOCKS: dict[str, asyncio.Lock] = {}
+# A login that times out means the router's web server is hanging. Retrying then (Home Assistant retries a failed
+# setup after 10, 20, 40 s...) piles up half-finished logins, which the router later counts as failed attempts and
+# answers with a lockout (MSG_LOGIN_1) that also locks the user out. So after a timeout no login is sent for a while,
+# and none is sent at all while the web page itself doesn't answer. Per router, like the spacing above.
+LOGIN_BACKOFF = 300.0
+PROBE_TIMEOUT = 10.0
+_HOLD_UNTIL: dict[str, float] = {}
 NETWORK_BY_INTERFACE = {"Device.WiFi.SSID.1": "wifi_24", "Device.WiFi.SSID.2": "wifi_5", "Device.WiFi.SSID.3": "guest"}
 
 
@@ -175,13 +182,33 @@ class VodafoneTechnicolorClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise ConnectError(str(err)) from err
 
+    async def _probe(self) -> None:
+        """The router's web page answers at all (no credentials sent). Any HTTP answer counts."""
+        try:
+            async with self._session.get(self._base, timeout=aiohttp.ClientTimeout(total=PROBE_TIMEOUT)):
+                return
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise ConnectError(f"web interface not answering ({type(err).__name__}); no login sent") from err
+
+    async def _login_request(self, data: dict) -> dict:
+        try:
+            return await self._request("POST", "api/v1/session/login", data)
+        except ConnectError as err:
+            if isinstance(err.__cause__, (aiohttp.ClientError, TimeoutError)):  # no answer, not an HTTP error
+                _HOLD_UNTIL[self._host] = time.monotonic() + LOGIN_BACKOFF
+            raise
+
     async def _login(self) -> None:
+        hold = _HOLD_UNTIL.get(self._host, float("-inf")) - time.monotonic()
+        if hold > 0:
+            raise ConnectError(f"a login timed out; next login in {hold:.0f} s")
+        await self._probe()
         wait = _LAST_LOGIN.get(self._host, float("-inf")) + MIN_LOGIN_INTERVAL - time.monotonic()
         if wait > 0:
             await asyncio.sleep(wait)
         _LAST_LOGIN[self._host] = time.monotonic()
         # No "logout" flag: if someone is using the web interface, back off instead of kicking them out.
-        salts = await self._request("POST", "api/v1/session/login", {"username": self._username, "password": "seeksalthash"})
+        salts = await self._login_request({"username": self._username, "password": "seeksalthash"})
         if salts.get("message") == "MSG_LOGIN_150":
             raise RouterBusy
         if "salt" not in salts:
@@ -189,7 +216,7 @@ class VodafoneTechnicolorClient:
             # data.failedAttempts). Treat it as an auth failure so Home Assistant stops polling and asks for the
             # password again, instead of retrying and extending the lockout.
             raise AuthError(f"login refused by the router: {salts.get('message')}")
-        res = await self._request("POST", "api/v1/session/login", {
+        res = await self._login_request({
             "username": self._username,
             "password": login_hash(self._password, salts["salt"], salts["saltwebui"]),
         })
