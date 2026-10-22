@@ -32,6 +32,11 @@ _LOCKS: dict[str, asyncio.Lock] = {}
 LOGIN_BACKOFF = 300.0
 PROBE_TIMEOUT = 10.0
 _HOLD_UNTIL: dict[str, float] = {}
+# Read-only pages listed in the router's menu, read on every poll for diagnostics (no settings, resets or restarts).
+EXTRA_PAGES = (
+    "devices", "phone_calllog", "pho_phone_numbers", "sta_voice_status", "sta_lan_status", "lan", "wan", "int_general",
+    "umts", "sta_umts_status", "ddns", "dmz", "wifi", "wifi_scheduling", "wif_band_steering", "sta_about",
+)
 NETWORK_BY_INTERFACE = {"Device.WiFi.SSID.1": "wifi_24", "Device.WiFi.SSID.2": "wifi_5", "Device.WiFi.SSID.3": "guest"}
 
 
@@ -164,8 +169,7 @@ class VodafoneTechnicolorClient:
     def __init__(self, session: aiohttp.ClientSession, host: str, username: str, password: str) -> None:
         self._session, self._base = session, f"http://{host}/"
         self._username, self._password = username, password
-        self._docsis: dict = {}
-        self._polls = 0
+        self.raw: dict = {}  # last answers as the router sent them, for diagnostics
         # One router session at a time: the router allows a single login, so overlapping polls must not interleave.
         self._lock = _LOCKS.setdefault(host, asyncio.Lock())
         self._host = host
@@ -222,7 +226,8 @@ class VodafoneTechnicolorClient:
         })
         if res.get("error") != "ok":
             raise AuthError(res.get("message"))
-        await self._request("GET", "api/v1/session/menu")  # data pages answer 401 until the menu has been loaded
+        # Data pages answer 401 until the menu has been loaded. It also lists every page this session may read.
+        self.raw = {"session/menu": await self._request("GET", "api/v1/session/menu")}
 
     async def _logout(self) -> None:
         try:
@@ -238,14 +243,19 @@ class VodafoneTechnicolorClient:
         self._session.cookie_jar.clear()
         await self._login()
         try:
-            router, networks = parse_status((await self._request("GET", "api/v1/sta_status"))["data"])
-            clients, phones = parse_hosts((await self._request("GET", "api/v1/host"))["data"])
-            # The cable line changes slowly: read it every 5th poll.
-            if not self._docsis or self._polls % 5 == 0:
-                self._docsis = parse_docsis((await self._request("GET", "api/v1/sta_docsis_status"))["data"])
-            self._polls += 1
+            # One login per poll, so every page is read each time.
+            for page in ("sta_status", "host", "sta_docsis_status"):
+                self.raw[page] = await self._request("GET", f"api/v1/{page}")
+            router, networks = parse_status(self.raw["sta_status"]["data"])
+            clients, phones = parse_hosts(self.raw["host"]["data"])
+            docsis = parse_docsis(self.raw["sta_docsis_status"]["data"])
+            for page in EXTRA_PAGES:
+                try:
+                    self.raw[page] = await self._request("GET", f"api/v1/{page}")
+                except ConnectError as err:  # an optional page must not cost the main data
+                    self.raw[page] = {"error": str(err)}
         except (KeyError, TypeError) as err:
             raise ConnectError(f"unexpected data: {err}") from err
         finally:
             await self._logout()
-        return RouterData(router=router, networks=networks, clients=clients, phones=phones, docsis=self._docsis)
+        return RouterData(router=router, networks=networks, clients=clients, phones=phones, docsis=docsis)
