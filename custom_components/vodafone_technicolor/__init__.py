@@ -21,7 +21,8 @@ _LOGGER = logging.getLogger(__name__)
 
 class VodafoneCoordinator(DataUpdateCoordinator[RouterData]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=60), config_entry=entry)
+        # Every poll is a full login; once a minute was enough to make the router's web server hang.
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(minutes=15), config_entry=entry)
         # Own cookie jar: the router session cookie must not be shared with other integrations.
         session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar(unsafe=True))
         d = entry.data
